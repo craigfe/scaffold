@@ -1,0 +1,4 @@
+(library
+ (name scaffold)
+ (public_name scaffold)
+ (libraries unix fmt cmdliner ppxlib))

@@ -1,0 +1,2 @@
+(include dune.inc)
+(vendored_dirs vendor)

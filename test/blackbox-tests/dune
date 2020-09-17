@@ -1,0 +1,8 @@
+(cram
+ (deps
+  (package scaffold)))
+
+(env
+ (_
+  (env-vars
+   (INSIDE_CRAM "true"))))

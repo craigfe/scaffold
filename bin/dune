@@ -1,0 +1,5 @@
+(executables
+ (names scaffold scaffold_pp)
+ (public_names ppx-tester ppx-tester-pp)
+ (package scaffold)
+ (libraries cmdliner ppxlib))
