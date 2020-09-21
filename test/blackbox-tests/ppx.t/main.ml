@@ -1,7 +1,7 @@
 open Scaffold
 
-let suite =
-  v ~this_file:__FILE__ ~ppx:"ppx_alcotest"
+let () =
+  v ~this_file:__FILE__ ~ppx:"ppx_foo"
     [
       ("passing", executables ~mode:`Ppx_expect ());
       ("failing", executables ~mode:`Ppx_expect ());

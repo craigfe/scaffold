@@ -13,6 +13,8 @@ module Test_case = struct
 end
 
 module Dsl = struct
+  type path = string list
+
   type executables = {
     mode : [ `Output_expect | `Ppx_expect ];
     expect_failure : bool;
@@ -30,7 +32,7 @@ module Dsl = struct
 
   and bindings = (string * dir) list
 
-  let rec index (b : bindings) : string list -> executables option = function
+  let rec index (b : bindings) : path -> executables option = function
     | [] -> assert false
     | p :: ps ->
         List.find_opt (fst >> ( = ) p) b
@@ -55,7 +57,7 @@ module Dsl = struct
     groups : (string * dir) list;
   }
 
-  let iter_leaves (f : string list -> executables -> unit) t =
+  let iter_leaves (f : path -> executables -> unit) t =
     let rec inner path = function
       | Executables e -> f (List.rev path) e
       | Group { children; _ } ->
@@ -63,7 +65,7 @@ module Dsl = struct
     in
     List.iter (fun (name, c) -> inner [ name ] c) t.groups
 
-  let get_package_and_libraries t : string list -> string option * string list =
+  let get_package_and_libraries t : path -> string option * string list =
     let rec inner acc b = function
       | [] -> acc
       | p :: ps -> (
@@ -127,13 +129,15 @@ let output_stanzas (suite : Dsl.spec) ~expect_failure =
   in
   let pp_rule ppf base =
     let pp_action ppf expect_failure =
+      let pp_bin = "%{exe:../pp.exe}" in
       Format.fprintf ppf
         ( if expect_failure then
           "; expect the process to fail, capturing stderr@,\
            @[<v 1>(with-stderr-to@,\
            %%{targets}@,\
-           (bash \"! ./%%{pp} -no-color --impl %%{input}\"))@]"
-        else "(run %%{bin:ppx-tester-pp} --impl %%{input} -o %%{targets})" )
+           (bash \"! %s -no-color --impl %%{input}\"))@]"
+        else "(run %s --impl %%{input} -o %%{targets})" )
+        pp_bin
     in
     Format.fprintf ppf
       "; Run the PPX on the `.ml` file@,\
@@ -178,10 +182,9 @@ let env_defined = Sys.getenv_opt >> function Some _ -> true | None -> false
 (* Starting from the current working directory, navigate upwards until a
    [dune-project] file is found. *)
 let goto_project_root () =
-  let inside_dune =
-    env_defined "INSIDE_DUNE" && not (env_defined "INSIDE_CRAM")
-  in
+  let inside_dune = env_defined "INSIDE_DUNE" in
   let rec inner ~ignore_ dir =
+    Fmt.epr "inner: %s\n%!" dir;
     let file_exists = Sys.file_exists (dir / "dune-project") in
     if file_exists && not ignore_ then Unix.chdir dir
     else
@@ -189,6 +192,7 @@ let goto_project_root () =
       assert (parent <> dir);
       inner ~ignore_:(ignore_ && not file_exists) (Filename.dirname dir)
   in
+  Fmt.epr "Initially at: %s\n%!" (Sys.getcwd ());
   inner ~ignore_:inside_dune (Sys.getcwd ())
 
 let remove_extension =
@@ -218,22 +222,54 @@ let fetch_test_cases ~(dir : string) : Test_case.t list =
              let has_opts = Str_set.mem ".opts" extensions in
              Some Test_case.{ name; has_expected; has_opts })
 
+let emit_toplevel_dune_inc (suite : Dsl.spec) =
+  match suite.ppx with
+  | None -> ()
+  | Some s ->
+      Fmt.pr
+        {|
+(rule
+ (targets pp.ml)
+ (action (with-stdout-to pp.ml (echo "Ppxlib.Driver.standalone ()"))))
+
+(executable
+ (name pp)
+ (modules pp)
+ (libraries ppxlib %s))
+  |}
+        s
+
 let emit_dune_inc (suite : Dsl.spec) ~path =
-  let ppf = Format.std_formatter in
-  let case = Dsl.index suite.groups path |> Option.get in
-  let dir = Sys.getcwd () in
-  if case.expect_failure then ppx_fail_global_stanzas ppf;
-  fetch_test_cases ~dir
-  |> List.iter (output_stanzas ~expect_failure:case.expect_failure suite ppf);
-  Format.fprintf ppf "\n%!"
+  match path with
+  | [] -> emit_toplevel_dune_inc suite
+  | _ :: _ ->
+      let ppf = Format.std_formatter in
+      let case =
+        match Dsl.index suite.groups path with
+        | Some s -> s
+        | None -> Fmt.failwith "Nothing at path %a" Fmt.(Dump.list string) path
+      in
+      let dir = Sys.getcwd () in
+      if case.expect_failure then ppx_fail_global_stanzas ppf;
+      fetch_test_cases ~dir
+      |> List.iter
+           (output_stanzas ~expect_failure:case.expect_failure suite ppf);
+      Format.fprintf ppf "\n%!"
+
+let new_file ~path =
+  Format.kasprintf (fun contents ->
+      let oc = open_out path in
+      Printf.fprintf oc "%s" contents;
+      close_out oc)
 
 module Bootstrap = struct
   (* For each case, we need to:
-     - set up [dune] to genereate [dune.inc] files the [.ml] files available in the directory
+     - set up [dune] to generate [dune.inc] files for each of the [.ml] files
+       available in the directory
+
      - create an empty [dune.inc] file
   *)
   let generate_group (suite : Dsl.spec) path =
-    let _case = Dsl.index suite.groups path |> Option.get in
     let package, _ = Dsl.get_package_and_libraries suite path in
     let dir = List.fold_left ( / ) (Filename.dirname suite.file) path in
     let dune_file = dir / "dune" in
@@ -250,13 +286,7 @@ module Bootstrap = struct
     else (
       log (fun f ->
           f "File '%s' does not exist yet. Generating it..." dune_file);
-      let dune_file = Unix.openfile dune_file [ O_CREAT; O_RDWR ] 0o666 in
-      let ppf =
-        dune_file
-        |> Unix.out_channel_of_descr
-        |> Format.formatter_of_out_channel
-      in
-      Format.fprintf ppf
+      new_file ~path:dune_file
         {|
 (include dune.inc)
 
@@ -267,7 +297,7 @@ module Bootstrap = struct
  (action
   (with-stdout-to
    %%{targets}
-   (run %%{exe:../%s.exe} generate --path %s))))
+   (run %%{exe:../%s.exe} generate --path '%s'))))
 
 (rule
  (alias runtest)%t
@@ -276,8 +306,7 @@ module Bootstrap = struct
 %!|}
         (Filename.chop_extension (Filename.basename suite.file))
         (String.concat "/" path) pp_package;
-      Unix.close dune_file;
-      Unix.openfile dune_inc_file [ O_CREAT ] 0o666 |> Unix.close;
+      new_file ~path:dune_inc_file "";
       true )
 
   let perform suite =
@@ -291,6 +320,6 @@ module Bootstrap = struct
     if changes_made then
       log (fun f ->
           f
-            "Dune files successfully installed. `dune runtest` again to run \
-             the newly-installed files.")
+            "Dune files successfully installed. `dune runtest` again to \
+             populate the newly-created `dune.inc` files.")
 end

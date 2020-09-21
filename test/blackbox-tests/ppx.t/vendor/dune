@@ -1,5 +1,5 @@
 (library
- (name ppx_alcotest)
- (public_name ppx_alcotest)
+ (name ppx_foo)
+ (public_name ppx_foo)
  (kind ppx_rewriter)
  (libraries ppxlib))

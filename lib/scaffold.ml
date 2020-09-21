@@ -8,8 +8,13 @@ let generate_dune_inc ~suite =
   in
   Term.(
     const (fun path ->
-        let path = String.split_on_char '/' path in
-        Engine.emit_dune_inc suite ~path)
+        match String.split_on_char '\'' path with
+        | [ ""; path; "" ] ->
+            let path =
+              match path with "" -> [] | _ -> String.split_on_char '/' path
+            in
+            Engine.emit_dune_inc suite ~path
+        | _ -> assert false)
     $ case)
 
 let emit_top_level ~suite =
