@@ -18,7 +18,7 @@ let generate_dune_inc ~suite =
     $ case)
 
 let emit_top_level ~suite =
-  Term.(const (fun () -> Engine.Bootstrap.perform suite) $ const ())
+  Term.(const (fun () -> Engine.bootstrap suite) $ const ())
 
 let declare suite =
   Term.(

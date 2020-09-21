@@ -50,7 +50,7 @@ let pp_rule (test_case : Test_case.t) (case : Dsl.executables) ppf =
     | Output _ -> failwith "TODO"
     | Ppxed_ast { styler; _ } ->
         let pp_styler ppf =
-          match styler with Some s -> Fmt.pf ppf "-styler %s" s | None -> ()
+          match styler with Some s -> Fmt.pf ppf " -styler %s" s | None -> ()
         in
         let pp_bin = "%{exe:../pp.exe}" in
         Format.fprintf ppf
@@ -59,7 +59,7 @@ let pp_rule (test_case : Test_case.t) (case : Dsl.executables) ppf =
              @[<v 1>(with-stderr-to@,\
              %%{targets}@,\
              (bash \"! %s %t -no-color --impl %%{input}\"))@]"
-          else "(run %s %t --impl %%{input} -o %%{targets})" )
+          else "(run %s%t --impl %%{input} -o %%{targets})" )
           pp_bin pp_styler
   in
   Format.fprintf ppf
@@ -270,3 +270,5 @@ module Bootstrap = struct
               "Dune files successfully installed. `dune runtest` again to \
                populate the newly-created `dune.inc` files.")
 end
+
+let bootstrap = Bootstrap.perform
