@@ -69,13 +69,18 @@ module Dsl = struct
     groups : (string * dir) list;
   }
 
-  let iter_leaves (f : path -> executables -> unit) t =
-    let rec inner path = function
-      | Executables e -> f (List.rev path) e
+  let fold_leaves (type a) (f : path -> executables -> a -> a) t (acc : a) : a =
+    let rec inner path acc = function
+      | Executables e -> f (List.rev path) e acc
       | Group { children; _ } ->
-          List.iter (fun (name, c) -> inner (name :: path) c) children
+          List.fold_left
+            (fun acc (name, c) -> inner (name :: path) acc c)
+            acc children
     in
-    List.iter (fun (name, c) -> inner [ name ] c) t.groups
+    List.fold_left (fun acc (name, c) -> inner [ name ] acc c) acc t.groups
+
+  (* let iter_leaves (f : path -> executables -> unit) t =
+   *   fold_leaves (fun p e () -> f p e) t () *)
 
   let get_package_and_libraries t : path -> string option * string list =
     let rec inner acc b = function
@@ -283,17 +288,15 @@ let new_file ~path =
       close_out oc)
 
 module Bootstrap = struct
-  (* For each case, we need to:
-     - set up [dune] to generate [dune.inc] files for each of the [.ml] files
-       available in the directory
+  let filepath_of_steps = List.fold_left Filename.concat ""
 
-     - create an empty [dune.inc] file
+  (* For each case, we need to set up a [dune] to update the [dune.inc] files for
+       each of the [.ml] files available in the directory
   *)
   let generate_group (suite : Dsl.spec) path =
     let package, _ = Dsl.get_package_and_libraries suite path in
     let dir = List.fold_left ( / ) (Filename.dirname suite.file) path in
     let dune_file = dir / "dune" in
-    let dune_inc_file = dir / "dune.inc" in
     let pp_package ppf =
       match package with
       | Some p -> Format.fprintf ppf "@,(package %s)" p
@@ -302,12 +305,9 @@ module Bootstrap = struct
     if not (Sys.file_exists dir) then (
       log (fun f -> f "File '%s' does not yet exist. Generating it..." dir);
       Unix.mkdir dir 0o777 );
-    if Sys.file_exists dune_file then false
-    else (
-      log (fun f ->
-          f "File '%s' does not exist yet. Generating it..." dune_file);
-      new_file ~path:dune_file
-        {|
+    log (fun f -> f "File '%s' does not exist yet. Generating it..." dune_file);
+    new_file ~path:dune_file
+      {|
 (include dune.inc)
 
 (rule
@@ -324,22 +324,42 @@ module Bootstrap = struct
  (action
   (diff dune.inc dune.inc.gen)))
 %!|}
-        (Filename.chop_extension (Filename.basename suite.file))
-        (String.concat "/" path) pp_package;
-      new_file ~path:dune_inc_file "";
-      true )
+      (Filename.chop_extension (Filename.basename suite.file))
+      (filepath_of_steps path) pp_package
+
+  (** Given a spec, get the files that must be automatically generated during
+      the bootstrapping process (given the current state of the FS). *)
+  let files_to_generate (t : Dsl.spec) : (string * (unit -> unit)) list =
+    let if_not_exists ~path (name, f) =
+      let path = Filename.concat (filepath_of_steps path) name in
+      if Sys.file_exists path then [] else [ (path, f) ]
+    in
+    let root_actions =
+      if_not_exists ~path:[] ("dune.inc", fun () -> emit_toplevel_dune_inc t)
+    in
+    let leaf_actions =
+      Dsl.fold_leaves
+        (fun path _ acc ->
+          if_not_exists ~path ("dune", fun () -> generate_group t path)
+          @ if_not_exists ~path
+              ( "dune.inc",
+                fun () ->
+                  new_file
+                    ~path:(Filename.concat (filepath_of_steps path) "dune.inc")
+                    "" )
+          @ acc)
+        t []
+    in
+    root_actions @ leaf_actions
 
   let perform suite =
     goto_project_root ();
-    let changes_made =
-      Dsl.iter_leaves
-        (fun path _case -> ignore (generate_group suite path))
-        suite;
-      true
-    in
-    if changes_made then
-      log (fun f ->
-          f
-            "Dune files successfully installed. `dune runtest` again to \
-             populate the newly-created `dune.inc` files.")
+    match files_to_generate suite with
+    | [] -> ()
+    | _ :: _ as fs ->
+        List.iter (fun (_, f) -> f ()) fs;
+        log (fun f ->
+            f
+              "Dune files successfully installed. `dune runtest` again to \
+               populate the newly-created `dune.inc` files.")
 end
