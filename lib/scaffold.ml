@@ -4,7 +4,13 @@ include Dsl
 let generate_dune_inc ~suite =
   let case =
     let open Arg in
-    required & opt (some string) None & info ~doc:"Foo" [ "path" ]
+    required
+    & opt (some string) None
+    & info ~doc:"PATH"
+        ~docv:
+          "The path of the directory containing the [dune] file to be \
+           generated, relative to the specification."
+        [ "path" ]
   in
   Term.(
     const (fun path ->
@@ -25,7 +31,7 @@ let declare suite =
     exit
     @@ eval_choice
          ( emit_top_level ~suite,
-           Term.info ~doc:"Utilities for testing OCaml PPXs" "ppx-tester" )
+           Term.info ~doc:"Utilities for testing OCaml PPXs" "scaffold" )
          [
            ( generate_dune_inc ~suite,
              Term.info ~doc:"Emit the correct `dune.inc` file for a test case"

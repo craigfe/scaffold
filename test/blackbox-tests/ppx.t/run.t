@@ -11,7 +11,8 @@ Running `dune runtest` for the first time will bootstrap the workflow:
   Error: Files _build/default/dune.scaffold-inc and
   _build/default/dune.scaffold-inc.gen differ.
           main alias runtest
-  Dune files `[failing/dune; failing/dune.inc; passing/dune; passing/dune.inc]' successfully installed. `dune runtest` again to populate the newly-created `dune.inc` files.
+  Dune files `[passing/.; failing/.; failing/dune; failing/dune.inc;
+               passing/dune; passing/dune.inc]' successfully installed. `dune runtest` again to populate the newly-created `dune.inc` files.
   Promoting _build/default/dune.scaffold-inc.gen to dune.scaffold-inc.
   [1]
 

@@ -13,7 +13,7 @@ let new_file ~path =
 (* Starting from the current working directory, navigate upwards until a
    [dune-project] file is found. *)
 let goto_project_root () =
-  let inside_dune = env_defined "INSIDE_DUNE" in
+  let inside_dune = env_defined "INSIDE_DUNE" && env_defined "INSIDE_CRAM" in
   let rec inner ~ignore_ dir =
     let file_exists = Sys.file_exists (dir / "dune-project") in
     if file_exists && not ignore_ then Unix.chdir dir
@@ -36,10 +36,7 @@ let generate_group (suite : Dsl.spec) path =
     | Some p -> Format.fprintf ppf "@,(package %s)" p
     | None -> ()
   in
-  if not (Sys.file_exists dir) then
-    (* log (fun f -> f "File '%s' does not yet exist. Generating it..." dir); *)
-    Unix.mkdir dir 0o777;
-  (* log (fun f -> f "File '%s' does not exist yet. Generating it..." dune_file); *)
+  (* NOTE: We assume that the directories in [path] have already been created. *)
   new_file ~path:dune_file
     {|
 (include dune.inc)
@@ -73,6 +70,16 @@ let files_to_generate (t : Dsl.spec) : (string * (unit -> unit)) list =
     if_not_exists ~path:[]
       ("dune.inc", fun () -> Engine.emit_toplevel_dune_inc t)
   in
+  let branch_actions =
+    Dsl.fold_directories
+      (fun path acc ->
+        if_not_exists ~path
+          ( Filename.current_dir_name,
+            fun () -> Unix.mkdir (filepath_of_steps path) 0o777 )
+        @ acc)
+      t []
+    |> List.rev
+  in
   let leaf_actions =
     Dsl.fold_leaves
       (fun path _ acc ->
@@ -101,7 +108,7 @@ let files_to_generate (t : Dsl.spec) : (string * (unit -> unit)) list =
         dune @ dune_inc @ expected_files @ acc)
       t []
   in
-  root_actions @ leaf_actions
+  root_actions @ branch_actions @ leaf_actions
 
 let perform suite =
   goto_project_root ();
@@ -114,5 +121,6 @@ let perform suite =
           f
             "Dune files `%a' successfully installed. `dune runtest` again to \
              populate the newly-created `dune.inc` files."
+            (* TODO: cleanup pretty-printer *)
             Fmt.(Dump.list string)
             names)

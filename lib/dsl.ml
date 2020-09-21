@@ -62,6 +62,18 @@ type spec = {
   groups : (string * dir) list;
 }
 
+(** Pre-order left-to-right traversal *)
+let fold_directories (type a) (f : path -> a -> a) t (acc : a) : a =
+  let rec inner path acc = function
+    | Executables _ -> f (List.rev path) acc
+    | Group { children; _ } ->
+        let acc = f (List.rev path) acc in
+        List.fold_left
+          (fun acc (name, c) -> inner (name :: path) acc c)
+          acc children
+  in
+  List.fold_left (fun acc (name, c) -> inner [ name ] acc c) acc t.groups
+
 let fold_leaves (type a) (f : path -> executables -> a -> a) t (acc : a) : a =
   let rec inner path acc = function
     | Executables e -> f (List.rev path) e acc

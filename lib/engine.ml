@@ -140,8 +140,7 @@ let emit_toplevel_dune_inc (suite : Dsl.spec) =
   | None -> ()
   | Some s ->
       Fmt.pr
-        {|
-(rule
+        {|(rule
  (targets pp.ml)
  (action (with-stdout-to pp.ml (echo "Ppxlib.Driver.standalone ()"))))
 
@@ -149,7 +148,7 @@ let emit_toplevel_dune_inc (suite : Dsl.spec) =
  (name pp)
  (modules pp)
  (libraries ppxlib %s))
-  |}
+|}
         s
 
 let emit_dune_inc (suite : Dsl.spec) ~path =
