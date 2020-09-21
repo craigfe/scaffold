@@ -3,26 +3,37 @@ module Dsl : sig
   (** The type of specifications of directories inside a test suite. *)
 
   val executables :
-    mode:[ `Output_expect | `Ppx_expect ] ->
     ?expect_failure:unit ->
     ?ppx:string ->
     ?sanitize:(in_channel -> out_channel -> unit) ->
     unit ->
     dir
   (** Define a directory in which each [.ml] file is an executable corresponding
-      to a test case. There are two possible [mode]s:
+      to a test case.Each executable will have its output captured in a
+      corresponding [.expected] file, after passing it through the optional
+      [sanitize] filter.
 
-      - [`Output_expect]: each executable will have its output captured in a
-        corresponding [.expected] file, after passing it through the optional
-        [sanitize] filter.
+      If [expect_failure] is passed, the execution of the executable must fail
+      with a non-zero exit code. New test cases can be added by creating a new
+      [.ml] file in the directory. *)
 
-      - [`Ppx_expect]: each [.ml] file is preprocessed using [ppx] and then the
-        AST is printed to a corresponding [.expected] file. The post-processed
-        file is also required to compile.
+  val ppx_tests :
+    ?expect_failure:unit ->
+    ?ppx:string ->
+    ?and_then:[ `Build | `Run ] ->
+    unit ->
+    dir
+  (** Define a directory in which each [.ml] file is a test case for a PPX. Each
+      file is preprocessed and then the AST is printed to a corresponding
+      [.expected] file.
 
-      If [expect_failure] is passed, the execution of the executable or PPX
-      respetively must fail with a non-zero exit code. New test cases can be
-      added by creating a new [.ml] file in the directory. *)
+      - If [expect_failure] is passed, then the preprocessor is required to fail
+        and the [.expected] file instead captures the standard output/error of
+        the process.
+
+      - If [and_then = `Build | `Run] is passed, then the post-processed
+        executable will be built or build-and-executed respectively. These
+        processes are required to succeed. *)
 
   val group :
     ?package:string ->

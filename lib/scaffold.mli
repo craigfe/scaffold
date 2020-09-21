@@ -14,14 +14,17 @@
 
     {[
       test/
-      |-- spec.ml
-      |-- dune
-      |-- dune.inc
-      `-- src/
-          |-- dune
-          |-- dune.inc
-          |-- ppx_tester.ml
-          `-- ppx_tester.mli
+      |-- spec.ml <---[generated-by]---\
+      |-- dune                         |
+      |-- dune.inc - - - - - - - - - ->|
+      `-- ppx_foo/                     |
+          |-- dune                     |
+          |-- dune.inc - - - - - - - ->|
+          |-- case1.ml
+          |-- case1.expected
+          |-- case2.ml
+          |-- case2.expected
+         ...
     ]} *)
 
 (** {2 Test directories} *)

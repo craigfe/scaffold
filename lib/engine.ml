@@ -15,11 +15,14 @@ end
 module Dsl = struct
   type path = string list
 
+  type expect_state =
+    | Ppxed_ast of { and_then : [ `Build | `Run ] option }
+    | Output of { sanitize : (in_channel -> out_channel -> unit) option }
+
   type executables = {
-    mode : [ `Output_expect | `Ppx_expect ];
-    expect_failure : bool;
     ppx : string option;
-    sanitize : (in_channel -> out_channel -> unit) option;
+    expect_failure : bool;
+    expect_state : expect_state;
   }
 
   type dir =
@@ -45,9 +48,14 @@ module Dsl = struct
   let group ?package ?(libraries = []) ?ppx:_ children =
     Group { package; libraries; children }
 
-  let executables ~mode ?expect_failure ?ppx ?sanitize () =
+  let executables ?expect_failure ?ppx ?sanitize () =
     let expect_failure = Bool.of_option_flag expect_failure in
-    Executables { mode; expect_failure; ppx; sanitize }
+    let expect_state = Output { sanitize } in
+    Executables { ppx; expect_failure; expect_state }
+
+  let ppx_tests ?expect_failure ?ppx ?and_then () =
+    let expect_failure = Bool.of_option_flag expect_failure in
+    Executables { ppx; expect_failure; expect_state = Ppxed_ast { and_then } }
 
   type spec = {
     package : string option;
@@ -115,39 +123,43 @@ let pp_package (suite : Dsl.spec) ppf =
   | None -> ()
   | Some p -> Fmt.pf ppf "@,(package %s)" p
 
+let pp_ppx (suite : Dsl.spec) ppf =
+  match suite.ppx with
+  | None -> ()
+  | Some p -> Fmt.pf ppf "@,(preprocess (pps %s))" p
+
+let pp_rule ~expect_failure (test_case : Test_case.t) ppf =
+  let pp_action ppf =
+    let pp_bin = "%{exe:../pp.exe}" in
+    Format.fprintf ppf
+      ( if expect_failure then
+        "; expect the process to fail, capturing stderr@,\
+         @[<v 1>(with-stderr-to@,\
+         %%{targets}@,\
+         (bash \"! %s -no-color --impl %%{input}\"))@]"
+      else "(run %s --impl %%{input} -o %%{targets})" )
+      pp_bin
+  in
+  Format.fprintf ppf
+    "; Run the PPX on the `.ml` file@,\
+     @[<v 1>(rule@,\
+     (targets %s.actual)@,\
+     @[<v 1>(deps@,\
+     (:input %s.ml))@]@,\
+     @[<v 1>(action@,\
+     %t))@]@]"
+    test_case.name test_case.name pp_action
+
 let output_stanzas (suite : Dsl.spec) ~expect_failure =
   let pp_library ppf base =
     (* If the PPX will fail, we don't need to declare the file as executable *)
     if not expect_failure then
       Format.fprintf ppf
-        "; The PPX-dependent executable under test@,\
-         @[<v 1>(executable@ (name %s)@ (modules %s)@ (preprocess (pps \
-         %s))%t)@]"
-        base base (suite.ppx |> Option.get)
+        "; The executable under test@,\
+         @[<v 1>(executable@ (name %s)@ (modules %s)%t%t)@]" base base
+        (pp_ppx suite)
         (pp_library_dependencies suite)
     else ()
-  in
-  let pp_rule ppf base =
-    let pp_action ppf expect_failure =
-      let pp_bin = "%{exe:../pp.exe}" in
-      Format.fprintf ppf
-        ( if expect_failure then
-          "; expect the process to fail, capturing stderr@,\
-           @[<v 1>(with-stderr-to@,\
-           %%{targets}@,\
-           (bash \"! %s -no-color --impl %%{input}\"))@]"
-        else "(run %s --impl %%{input} -o %%{targets})" )
-        pp_bin
-    in
-    Format.fprintf ppf
-      "; Run the PPX on the `.ml` file@,\
-       @[<v 1>(rule@,\
-       (targets %s.actual)@,\
-       @[<v 1>(deps@,\
-       (:input %s.ml))@]@,\
-       @[<v 1>(action@,\
-       %a))@]@]"
-      base base pp_action expect_failure
   in
   let pp_diff_alias ppf base =
     Format.fprintf ppf
@@ -172,10 +184,12 @@ let output_stanzas (suite : Dsl.spec) ~expect_failure =
          @[<hov 2>(run@ ./%s.exe)@])@])@]" (pp_package suite) base
     else ()
   in
-  fun ppf Test_case.{ name; _ } ->
+  fun ppf (Test_case.{ name; _ } as tc) ->
     Format.fprintf ppf
-      "@[<v 0>; -------- Test: `%s.ml` --------@,@,%a@,@,%a@,@,%a%a@,@]@." name
-      pp_library name pp_rule name pp_diff_alias name pp_run_alias name
+      "@[<v 0>; -------- Test: `%s.ml` --------@,@,%a@,@,%t@,@,%a%a@,@]@." name
+      pp_library name
+      (pp_rule ~expect_failure tc)
+      pp_diff_alias name pp_run_alias name
 
 let env_defined = Sys.getenv_opt >> function Some _ -> true | None -> false
 

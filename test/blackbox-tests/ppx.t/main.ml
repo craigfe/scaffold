@@ -2,8 +2,5 @@ open Scaffold
 
 let () =
   v ~this_file:__FILE__ ~ppx:"ppx_foo"
-    [
-      ("passing", executables ~mode:`Ppx_expect ());
-      ("failing", executables ~mode:`Ppx_expect ());
-    ]
+    [ ("passing", ppx_tests ()); ("failing", ppx_tests ()) ]
   |> declare
