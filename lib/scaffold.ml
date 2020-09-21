@@ -1,5 +1,5 @@
 open Cmdliner
-include Engine.Dsl
+include Dsl
 
 let generate_dune_inc ~suite =
   let case =
