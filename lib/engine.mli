@@ -20,6 +20,7 @@ module Dsl : sig
   val ppx_tests :
     ?expect_failure:unit ->
     ?ppx:string ->
+    ?styler:string ->
     ?and_then:[ `Build | `Run ] ->
     unit ->
     dir
@@ -30,6 +31,9 @@ module Dsl : sig
       - If [expect_failure] is passed, then the preprocessor is required to fail
         and the [.expected] file instead captures the standard output/error of
         the process.
+
+      - If [styler] is passed, it specifies the name of a binary to use for
+        formatting the resulting AST before writing it to the [.expected] file.
 
       - If [and_then = `Build | `Run] is passed, then the post-processed
         executable will be built or build-and-executed respectively. These

@@ -28,7 +28,7 @@ let declare suite =
            Term.info ~doc:"Utilities for testing OCaml PPXs" "ppx-tester" )
          [
            ( generate_dune_inc ~suite,
-             Term.info ~doc:"Emit the correct [dune.inc] file for a test case"
+             Term.info ~doc:"Emit the correct `dune.inc` file for a test case"
                "generate" );
          ]);
   assert false

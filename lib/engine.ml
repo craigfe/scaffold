@@ -16,7 +16,10 @@ module Dsl = struct
   type path = string list
 
   type expect_state =
-    | Ppxed_ast of { and_then : [ `Build | `Run ] option }
+    | Ppxed_ast of {
+        styler : string option;
+        and_then : [ `Build | `Run ] option;
+      }
     | Output of { sanitize : (in_channel -> out_channel -> unit) option }
 
   type executables = {
@@ -53,9 +56,10 @@ module Dsl = struct
     let expect_state = Output { sanitize } in
     Executables { ppx; expect_failure; expect_state }
 
-  let ppx_tests ?expect_failure ?ppx ?and_then () =
+  let ppx_tests ?expect_failure ?ppx ?styler ?and_then () =
     let expect_failure = Bool.of_option_flag expect_failure in
-    Executables { ppx; expect_failure; expect_state = Ppxed_ast { and_then } }
+    let expect_state = Ppxed_ast { styler; and_then } in
+    Executables { ppx; expect_failure; expect_state }
 
   type spec = {
     package : string option;
@@ -128,17 +132,23 @@ let pp_ppx (suite : Dsl.spec) ppf =
   | None -> ()
   | Some p -> Fmt.pf ppf "@,(preprocess (pps %s))" p
 
-let pp_rule ~expect_failure (test_case : Test_case.t) ppf =
+let pp_rule (test_case : Test_case.t) (case : Dsl.executables) ppf =
   let pp_action ppf =
-    let pp_bin = "%{exe:../pp.exe}" in
-    Format.fprintf ppf
-      ( if expect_failure then
-        "; expect the process to fail, capturing stderr@,\
-         @[<v 1>(with-stderr-to@,\
-         %%{targets}@,\
-         (bash \"! %s -no-color --impl %%{input}\"))@]"
-      else "(run %s --impl %%{input} -o %%{targets})" )
-      pp_bin
+    match case.expect_state with
+    | Output _ -> failwith "TODO"
+    | Ppxed_ast { styler; _ } ->
+        let pp_styler ppf =
+          match styler with Some s -> Fmt.pf ppf "-styler %s" s | None -> ()
+        in
+        let pp_bin = "%{exe:../pp.exe}" in
+        Format.fprintf ppf
+          ( if case.expect_failure then
+            "; expect the process to fail, capturing stderr@,\
+             @[<v 1>(with-stderr-to@,\
+             %%{targets}@,\
+             (bash \"! %s %t -no-color --impl %%{input}\"))@]"
+          else "(run %s %t --impl %%{input} -o %%{targets})" )
+          pp_bin pp_styler
   in
   Format.fprintf ppf
     "; Run the PPX on the `.ml` file@,\
@@ -150,10 +160,10 @@ let pp_rule ~expect_failure (test_case : Test_case.t) ppf =
      %t))@]@]"
     test_case.name test_case.name pp_action
 
-let output_stanzas (suite : Dsl.spec) ~expect_failure =
+let output_stanzas (suite : Dsl.spec) ~(case : Dsl.executables) =
   let pp_library ppf base =
     (* If the PPX will fail, we don't need to declare the file as executable *)
-    if not expect_failure then
+    if not case.expect_failure then
       Format.fprintf ppf
         "; The executable under test@,\
          @[<v 1>(executable@ (name %s)@ (modules %s)%t%t)@]" base base
@@ -173,7 +183,7 @@ let output_stanzas (suite : Dsl.spec) ~expect_failure =
   let pp_run_alias ppf base =
     (* If we expect the derivation to succeed, then we should be able to compile
        the output. *)
-    if not expect_failure then
+    if not case.expect_failure then
       Format.fprintf ppf
         "@,\
          @,\
@@ -187,9 +197,7 @@ let output_stanzas (suite : Dsl.spec) ~expect_failure =
   fun ppf (Test_case.{ name; _ } as tc) ->
     Format.fprintf ppf
       "@[<v 0>; -------- Test: `%s.ml` --------@,@,%a@,@,%t@,@,%a%a@,@]@." name
-      pp_library name
-      (pp_rule ~expect_failure tc)
-      pp_diff_alias name pp_run_alias name
+      pp_library name (pp_rule tc case) pp_diff_alias name pp_run_alias name
 
 let env_defined = Sys.getenv_opt >> function Some _ -> true | None -> false
 
@@ -265,9 +273,7 @@ let emit_dune_inc (suite : Dsl.spec) ~path =
       in
       let dir = Sys.getcwd () in
       if case.expect_failure then ppx_fail_global_stanzas ppf;
-      fetch_test_cases ~dir
-      |> List.iter
-           (output_stanzas ~expect_failure:case.expect_failure suite ppf);
+      fetch_test_cases ~dir |> List.iter (output_stanzas ~case suite ppf);
       Format.fprintf ppf "\n%!"
 
 let new_file ~path =
