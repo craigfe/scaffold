@@ -1,6 +1,12 @@
 let ( >> ) f g x = g (f x)
 let under2 f b x y = b (f x) (f y)
 
+let log :
+    type a. (((a, Format.formatter, unit, unit) format4 -> a) -> unit) -> unit =
+ fun f ->
+  f Format.eprintf;
+  Format.eprintf "\n%!"
+
 module Bool = struct
   include Bool
 

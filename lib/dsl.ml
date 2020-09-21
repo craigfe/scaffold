@@ -1,5 +1,13 @@
 open Utils
 
+module Test_case = struct
+  (* TODO: find a better place for this; it's not part of the DSL per-se *)
+  let expected_ext = ".expected"
+  let opts_ext = ".opts"
+
+  type t = { name : string; has_expected : bool; has_opts : bool }
+end
+
 type path = string list
 
 type expect_state =
@@ -32,7 +40,8 @@ let rec index (b : bindings) : path -> executables option = function
              | _ :: _, Group { children; _ } -> index children ps
              | _ -> None)
 
-let group ?package ?(libraries = []) ?ppx:_ children =
+let group ?package ?(libraries = []) ?ppx:_
+    (* TODO: keep PPX in groups *) children =
   Group { package; libraries; children }
 
 let executables ?expect_failure ?ppx ?sanitize () =

@@ -1,19 +1,5 @@
 open Utils
-
-let ( / ) = Filename.concat
-
-let log :
-    type a. (((a, Format.formatter, unit, unit) format4 -> a) -> unit) -> unit =
- fun f ->
-  f Format.eprintf;
-  Format.eprintf "\n%!"
-
-module Test_case = struct
-  let expected_ext = ".expected"
-  let opts_ext = ".opts"
-
-  type t = { name : string; has_expected : bool; has_opts : bool }
-end
+module Tc = Dsl.Test_case
 
 (* Global configuration for tests in which the PPX fails (for consistency with
    various compiler versions / platforms). *)
@@ -47,7 +33,7 @@ let pp_ppx (suite : Dsl.spec) ppf =
   | None -> ()
   | Some p -> Fmt.pf ppf "@,(preprocess (pps %s))" p
 
-let pp_rule (test_case : Test_case.t) (case : Dsl.executables) ppf =
+let pp_rule (test_case : Tc.t) (case : Dsl.executables) ppf =
   let pp_action ppf =
     match case.expect_state with
     | Output _ -> failwith "TODO"
@@ -93,8 +79,8 @@ let output_stanzas (suite : Dsl.spec) ~(case : Dsl.executables) =
        @[<v 1>(rule@,\
        (alias runtest)@,\
        %t@[<v 1>(action@,\
-       @[<hov 2>(diff@ %s%s@ %s.actual)@])@])@]" Test_case.expected_ext
-      (pp_package suite) base Test_case.expected_ext base
+       @[<hov 2>(diff@ %s%s@ %s.actual)@])@])@]" Tc.expected_ext
+      (pp_package suite) base Tc.expected_ext base
   in
   let pp_run_alias ppf base =
     (* If we expect the derivation to succeed, then we should be able to compile
@@ -110,7 +96,7 @@ let output_stanzas (suite : Dsl.spec) ~(case : Dsl.executables) =
          @[<hov 2>(run@ ./%s.exe)@])@])@]" (pp_package suite) base
     else ()
   in
-  fun ppf (Test_case.{ name; _ } as tc) ->
+  fun ppf (Tc.{ name; _ } as tc) ->
     let header =
       let left = Fmt.str "; -------- Test: `%s.ml` " name in
       let right = String.make (max 0 (80 - String.length left)) '-' in
@@ -118,22 +104,6 @@ let output_stanzas (suite : Dsl.spec) ~(case : Dsl.executables) =
     in
     Format.fprintf ppf "@[<v 0>%s@,@,%a@,@,%t@,@,%a%a@,@]@." header pp_library
       name (pp_rule tc case) pp_diff_alias name pp_run_alias name
-
-let env_defined = Sys.getenv_opt >> function Some _ -> true | None -> false
-
-(* Starting from the current working directory, navigate upwards until a
-   [dune-project] file is found. *)
-let goto_project_root () =
-  let inside_dune = env_defined "INSIDE_DUNE" in
-  let rec inner ~ignore_ dir =
-    let file_exists = Sys.file_exists (dir / "dune-project") in
-    if file_exists && not ignore_ then Unix.chdir dir
-    else
-      let parent = Filename.dirname dir in
-      assert (parent <> dir);
-      inner ~ignore_:(ignore_ && not file_exists) (Filename.dirname dir)
-  in
-  inner ~ignore_:inside_dune (Sys.getcwd ())
 
 let remove_extension =
   let rec inner f =
@@ -145,7 +115,7 @@ module Str_set = Set.Make (String)
 
 (* Each test case has a single basename and a set of file extensions ([.ml],
    [.expected] and optionally [.opts]). *)
-let fetch_test_cases ~(dir : string) : Test_case.t list option =
+let fetch_test_cases ~(dir : string) : Tc.t list option =
   if Sys.file_exists dir then
     Sys.readdir dir
     |> Array.to_list
@@ -159,11 +129,9 @@ let fetch_test_cases ~(dir : string) : Test_case.t list option =
            match Str_set.mem ".ml" extensions with
            | false -> None
            | true ->
-               let has_expected =
-                 Str_set.mem Test_case.expected_ext extensions
-               in
-               let has_opts = Str_set.mem Test_case.opts_ext extensions in
-               Some Test_case.{ name; has_expected; has_opts })
+               let has_expected = Str_set.mem Tc.expected_ext extensions in
+               let has_opts = Str_set.mem Tc.opts_ext extensions in
+               Some Tc.{ name; has_expected; has_opts })
     |> Option.some
   else None
 
@@ -200,106 +168,3 @@ let emit_dune_inc (suite : Dsl.spec) ~path =
       |> Option.get
       |> List.iter (output_stanzas ~case suite ppf);
       Format.fprintf ppf "\n%!"
-
-let new_file ~path =
-  Format.kasprintf (fun contents ->
-      let oc = open_out path in
-      Printf.fprintf oc "%s" contents;
-      close_out oc)
-
-module Bootstrap = struct
-  let filepath_of_steps = List.fold_left Filename.concat ""
-
-  (* For each case, we need to set up a [dune] to update the [dune.inc] files for
-       each of the [.ml] files available in the directory
-  *)
-  let generate_group (suite : Dsl.spec) path =
-    let package, _ = Dsl.get_package_and_libraries suite path in
-    let dir = List.fold_left ( / ) (Filename.dirname suite.file) path in
-    let dune_file = dir / "dune" in
-    let pp_package ppf =
-      match package with
-      | Some p -> Format.fprintf ppf "@,(package %s)" p
-      | None -> ()
-    in
-    if not (Sys.file_exists dir) then
-      (* log (fun f -> f "File '%s' does not yet exist. Generating it..." dir); *)
-      Unix.mkdir dir 0o777;
-    (* log (fun f -> f "File '%s' does not exist yet. Generating it..." dune_file); *)
-    new_file ~path:dune_file
-      {|
-(include dune.inc)
-
-(rule
- (targets dune.inc.gen)
- (deps
-  (source_tree .))
- (action
-  (with-stdout-to
-   %%{targets}
-   (run %%{exe:../%s.exe} generate --path '%s'))))
-
-(rule
- (alias runtest)%t
- (action
-  (diff dune.inc dune.inc.gen)))
-%!|}
-      (Filename.chop_extension (Filename.basename suite.file))
-      (filepath_of_steps path) pp_package
-
-  (** Given a spec, get the files that must be automatically generated during
-      the bootstrapping process (given the current state of the FS). *)
-  let files_to_generate (t : Dsl.spec) : (string * (unit -> unit)) list =
-    let if_not_exists ~path (name, f) =
-      (* TODO: avoid repeatedly coercing between [string list] and [string] here *)
-      let path = Filename.concat (filepath_of_steps path) name in
-      if Sys.file_exists path then [] else [ (path, f) ]
-    in
-    let root_actions =
-      if_not_exists ~path:[] ("dune.inc", fun () -> emit_toplevel_dune_inc t)
-    in
-    let leaf_actions =
-      Dsl.fold_leaves
-        (fun path _ acc ->
-          let dune =
-            if_not_exists ~path ("dune", fun () -> generate_group t path)
-          in
-          let dune_inc =
-            if_not_exists ~path
-              ( "dune.inc",
-                fun () ->
-                  new_file ~path:(filepath_of_steps path / "dune.inc") "" )
-          in
-          let expected_files =
-            fetch_test_cases ~dir:(filepath_of_steps path)
-            |> Option.map
-                 (List.filter_map (fun Test_case.{ name; has_expected; _ } ->
-                      let path =
-                        filepath_of_steps path / (name ^ Test_case.expected_ext)
-                      in
-                      if not has_expected then
-                        Some (path, fun () -> new_file ~path "")
-                      else None))
-            |> Option.fold ~none:[] ~some:Fun.id
-          in
-          dune @ dune_inc @ expected_files @ acc)
-        t []
-    in
-    root_actions @ leaf_actions
-
-  let perform suite =
-    goto_project_root ();
-    match files_to_generate suite with
-    | [] -> ()
-    | _ :: _ as fs ->
-        List.iter (fun (_, f) -> f ()) fs;
-        log (fun f ->
-            let names = List.map (fun (a, _) -> a) fs in
-            f
-              "Dune files `%a' successfully installed. `dune runtest` again to \
-               populate the newly-created `dune.inc` files."
-              Fmt.(Dump.list string)
-              names)
-end
-
-let bootstrap = Bootstrap.perform

@@ -1,5 +1,3 @@
-val bootstrap : Dsl.spec -> unit
-(** Given a suite, generate the [dune] files necessary to bootstrap a workflow
-    (or do nothing if the workflow is already bootstrapped). *)
-
+val fetch_test_cases : dir:string -> Dsl.Test_case.t list option
+val emit_toplevel_dune_inc : Dsl.spec -> unit
 val emit_dune_inc : Dsl.spec -> path:string list -> unit
