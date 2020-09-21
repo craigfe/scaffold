@@ -10,4 +10,8 @@
 (package
  (name scaffold)
  (synopsis "Lightweight framework for propping up test frameworks")
- (documentation https://CraigFe.github.io/scaffold/))
+ (documentation https://CraigFe.github.io/scaffold/)
+ (depends
+  fmt
+  cmdliner
+  ppxlib))

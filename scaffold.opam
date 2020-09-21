@@ -8,6 +8,9 @@ doc: "https://CraigFe.github.io/scaffold/"
 bug-reports: "https://github.com/CraigFe/scaffold/issues"
 depends: [
   "dune" {>= "2.7"}
+  "fmt"
+  "cmdliner"
+  "ppxlib"
   "odoc" {with-doc}
 ]
 build: [
