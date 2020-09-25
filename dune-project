@@ -12,6 +12,7 @@
  (synopsis "Lightweight framework for propping up test frameworks")
  (documentation https://CraigFe.github.io/scaffold/)
  (depends
+  (ocaml (>= 4.05))
   fmt
   cmdliner
   ppxlib))

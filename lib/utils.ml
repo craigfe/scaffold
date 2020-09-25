@@ -8,13 +8,41 @@ let log :
   Format.eprintf "\n%!"
 
 module Bool = struct
-  include Bool
-
   let of_option_flag = function Some () -> true | None -> false
+end
+
+module Option = struct
+  let map f = function Some x -> Some (f x) | None -> None
+  let bind x f = match x with Some x -> f x | None -> None
+  let get = function Some x -> x | None -> failwith "Option.get None"
+  let some x = Some x
+  let fold ~none ~some = function None -> none | Some x -> some x
+end
+
+module Fun = struct
+  let id x = x
+  let flip f a b = f b a
 end
 
 module List = struct
   include List
+
+  let filter_map f =
+    let rec aux accu = function
+      | [] -> List.rev accu
+      | x :: l -> (
+          match f x with None -> aux accu l | Some v -> aux (v :: accu) l )
+    in
+    aux []
+
+  let rec find_opt p = function
+    | [] -> None
+    | x :: l -> if p x then Some x else find_opt p l
+
+  let rec find_map f = function
+    | [] -> None
+    | x :: l -> (
+        match f x with Some _ as result -> result | None -> find_map f l )
 
   let group ~break =
     List.fold_left
