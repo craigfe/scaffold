@@ -11,7 +11,10 @@ end
 type path = string list
 
 type expect_state =
-  | Ppxed_ast of { styler : string option; and_then : [ `Build | `Run ] option }
+  | Ppxed_ast of {
+      styler : string option;
+      and_then : [ `Noop | `Build | `Run ];
+    }
   | Output of { sanitize : (in_channel -> out_channel -> unit) option }
 
 type executables = {
@@ -51,6 +54,11 @@ let executables ?expect_failure ?ppx ?sanitize () =
 
 let ppx_tests ?expect_failure ?ppx ?styler ?and_then () =
   let expect_failure = Bool.of_option_flag expect_failure in
+  let and_then =
+    match and_then with
+    | Some s -> s
+    | None -> if expect_failure then `Noop else `Run
+  in
   let expect_state = Ppxed_ast { styler; and_then } in
   Executables { ppx; expect_failure; expect_state }
 

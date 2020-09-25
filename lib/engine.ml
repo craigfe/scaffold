@@ -13,15 +13,10 @@ let ppx_fail_global_stanzas ppf =
 
 |}
 
-let pp_list pp_elt ppf =
-  List.iter (fun elt ->
-      pp_elt ppf elt;
-      Format.pp_print_space ppf ())
-
 let pp_library_dependencies (suite : Dsl.spec) ppf =
   match suite.libraries with
   | [] -> ()
-  | ls -> Fmt.pf ppf "@,(libraries %a)" (pp_list Format.pp_print_string) ls
+  | ls -> Fmt.pf ppf "@,(libraries %a)" Fmt.(list ~sep:sp string) ls
 
 let pp_package (suite : Dsl.spec) ppf =
   match suite.package with
@@ -34,23 +29,28 @@ let pp_ppx (suite : Dsl.spec) ppf =
   | Some p -> Fmt.pf ppf "@,(preprocess (pps %s))" p
 
 let pp_rule (test_case : Tc.t) (case : Dsl.executables) ppf =
+  let with_styler fmt ppf =
+    match case.expect_state with
+    | Output _ -> failwith "TODO"
+    | Ppxed_ast { styler; _ } -> (
+        match styler with
+        | Some s -> Fmt.pf ppf "(pipe-stdout %t (run %s))" fmt s
+        | None -> fmt ppf )
+  in
   let pp_action ppf =
     match case.expect_state with
     | Output _ -> failwith "TODO"
-    | Ppxed_ast { styler; _ } ->
-        let pp_styler ppf =
-          match styler with Some s -> Fmt.pf ppf " -styler %s" s | None -> ()
-        in
+    | Ppxed_ast _ ->
         let pp_bin = "%{exe:../pp.exe}" (* TODO: determine path properly *) in
         Format.fprintf ppf
           ( if case.expect_failure then
             "; expect the process to fail, capturing stderr@,\
              @[<v 1>(with-stderr-to@,\
              %%{targets}@,\
-             (bash \"! %s %t -no-color --impl %%{input}\"))@]"
+             (bash \"! %s -no-color --impl %%{input}\"))@]"
             (* TODO: use (with-accepted-exit-codes) *)
-          else "(run %s%t --impl %%{input} -o %%{targets})" )
-          pp_bin pp_styler
+          else "(run %s --impl %%{input})" )
+          pp_bin
   in
   Format.fprintf ppf
     "; Run the PPX on the `.ml` file@,\
@@ -59,51 +59,69 @@ let pp_rule (test_case : Tc.t) (case : Dsl.executables) ppf =
      @[<v 1>(deps@,\
      (:input %s.ml))@]@,\
      @[<v 1>(action@,\
-     %t))@]@]"
-    test_case.name test_case.name pp_action
+     @[<v 1>(with-stdout-to@,\
+     %%{targets}@,\
+     %t)@])@])@]"
+    test_case.name test_case.name (with_styler pp_action)
 
 let output_stanzas (suite : Dsl.spec) ~(case : Dsl.executables) =
-  let pp_library ppf base =
-    (* If the PPX will fail, we don't need to declare the file as executable *)
-    if not case.expect_failure then
-      Format.fprintf ppf
-        "; The executable under test@,\
-         @[<v 1>(executable@ (name %s)@ (modules %s)%t%t)@]" base base
-        (pp_ppx suite)
-        (pp_library_dependencies suite)
-    else ()
-  in
-  let pp_diff_alias ppf base =
-    Format.fprintf ppf
-      "; Compare the post-processed output to the %s file@,\
-       @[<v 1>(rule@,\
-       (alias runtest)@,\
-       %t@[<v 1>(action@,\
-       @[<hov 2>(diff@ %s%s@ %s.actual)@])@])@]" Tc.expected_ext
-      (pp_package suite) base Tc.expected_ext base
-  in
-  let pp_run_alias ppf base =
-    (* If we expect the derivation to succeed, then we should be able to compile
-       the output. *)
-    if not case.expect_failure then
-      Format.fprintf ppf
-        "@,\
-         @,\
-         ; Ensure that the post-processed executable runs correctly@,\
-         @[<v 1>(rule@,\
-         (alias runtest)@,\
-         %t@[<v 1>(action@,\
-         @[<hov 2>(run@ ./%s.exe)@])@])@]" (pp_package suite) base
-    else ()
-  in
-  fun ppf (Tc.{ name; _ } as tc) ->
-    let header =
-      let left = Fmt.str "; -------- Test: `%s.ml` " name in
-      let right = String.make (max 0 (80 - String.length left)) '-' in
-      left ^ right
-    in
-    Format.fprintf ppf "@[<v 0>%s@,@,%a@,@,%t@,@,%a%a@,@]@." header pp_library
-      name (pp_rule tc case) pp_diff_alias name pp_run_alias name
+  match case.expect_state with
+  | Output _ -> failwith "TODO"
+  | Ppxed_ast { and_then; _ } ->
+      let pp_library ppf base =
+        (* If the PPX will fail, we don't need to declare the file as executable *)
+        if not case.expect_failure then
+          Format.fprintf ppf
+            "; The executable under test@,\
+             @[<v 1>(executable@ (name %s)@ (modules %s)%t%t)@]" base base
+            (pp_ppx suite)
+            (pp_library_dependencies suite)
+        else ()
+      in
+      let pp_diff_alias ppf base =
+        Format.fprintf ppf
+          "; Compare the post-processed output to the %s file@,\
+           @[<v 1>(rule@,\
+           (alias runtest)@,\
+           %t@[<v 1>(action@,\
+           @[<hov 2>(diff@ %s%s@ %s.actual)@])@])@]" Tc.expected_ext
+          (pp_package suite) base Tc.expected_ext base
+      in
+      let pp_run_alias ppf base =
+        match (case.expect_failure, and_then) with
+        | true, (`Build | `Run) ->
+            failwith
+              "Cannot build or run a PPXed executable where the PPX is \
+               expected to fail"
+            (* TODO: Handle DSL errors in a consistent way *)
+        | (true | false), `Noop -> ()
+        | false, `Build ->
+            Fmt.pf ppf
+              "@,\
+               @,\
+               ; Ensure that the post-process executable builds correctly@,\
+               @[<v 1>(rule@,\
+               (alias runtest)@,\
+               (deps %s.exe)@,\
+               %t(action progn))@]" base (pp_package suite)
+        | false, `Run ->
+            Fmt.pf ppf
+              "@,\
+               @,\
+               ; Ensure that the post-processed executable runs correctly@,\
+               @[<v 1>(rule@,\
+               (alias runtest)@,\
+               %t@[<v 1>(action@,\
+               @[<hov 2>(run@ ./%s.exe)@])@])@]" (pp_package suite) base
+      in
+      fun ppf (Tc.{ name; _ } as tc) ->
+        let header =
+          let left = Fmt.str "; -------- Test: `%s.ml` " name in
+          let right = String.make (max 0 (80 - String.length left)) '-' in
+          left ^ right
+        in
+        Format.fprintf ppf "@[<v 0>%s@,@,%a@,@,%t@,@,%a%a@,@]@." header
+          pp_library name (pp_rule tc case) pp_diff_alias name pp_run_alias name
 
 let remove_extension =
   let rec inner f =

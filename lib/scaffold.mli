@@ -51,7 +51,7 @@ val ppx_tests :
   ?expect_failure:unit ->
   ?ppx:string ->
   ?styler:string ->
-  ?and_then:[ `Build | `Run ] ->
+  ?and_then:[ `Noop | `Build | `Run ] ->
   unit ->
   dir
 (** Define a directory in which each [.ml] file is a test case for a PPX. Each

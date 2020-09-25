@@ -13,7 +13,7 @@ let new_file ~path =
 (* Starting from the current working directory, navigate upwards until a
    [dune-project] file is found. *)
 let goto_project_root () =
-  let inside_dune = env_defined "INSIDE_DUNE" && env_defined "INSIDE_CRAM" in
+  let inside_dune = env_defined "INSIDE_DUNE" || env_defined "INSIDE_CRAM" in
   let rec inner ~ignore_ dir =
     let file_exists = Sys.file_exists (dir / "dune-project") in
     if file_exists && not ignore_ then Unix.chdir dir
@@ -63,7 +63,7 @@ let generate_group (suite : Dsl.spec) path =
 let files_to_generate (t : Dsl.spec) : (string * (unit -> unit)) list =
   let if_not_exists ~path (name, f) =
     (* TODO: avoid repeatedly coercing between [string list] and [string] here *)
-    let path = Filename.concat (filepath_of_steps path) name in
+    let path = Filename.dirname t.file / filepath_of_steps path / name in
     if Sys.file_exists path then [] else [ (path, f) ]
   in
   let root_actions =
@@ -110,6 +110,15 @@ let files_to_generate (t : Dsl.spec) : (string * (unit -> unit)) list =
   in
   root_actions @ branch_actions @ leaf_actions
 
+let pp_unordered_list pp_elt ppf =
+  let rec inner = function
+    | [] -> ()
+    | x :: xs ->
+        Fmt.pf ppf "- %a@," pp_elt x;
+        inner xs
+  in
+  inner
+
 let perform suite =
   goto_project_root ();
   match files_to_generate suite with
@@ -117,10 +126,15 @@ let perform suite =
   | _ :: _ as fs ->
       List.iter (fun (_, f) -> f ()) fs;
       log (fun f ->
-          let names = List.map (fun (a, _) -> a) fs in
+          let names =
+            List.map (fun (a, _) -> a) fs |> List.sort String.compare
+          in
           f
-            "Dune files `%a' successfully installed. `dune runtest` again to \
-             populate the newly-created `dune.inc` files."
-            (* TODO: cleanup pretty-printer *)
-            Fmt.(Dump.list string)
+            "@[<v 0>Files successfully installed in `%s':@,\
+             @,\
+             %a@,\
+             `dune runtest` again to populate the newly-created `dune.inc` \
+             files.@]"
+            (Sys.getcwd ())
+            (pp_unordered_list Fmt.string)
             names)
